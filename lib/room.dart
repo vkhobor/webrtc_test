@@ -1,3 +1,4 @@
+
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:webrtc_test/signaling.dart';
 
@@ -181,7 +182,10 @@ class PeerConnection {
         'peerConnection1-dc',
         RTCDataChannelInit()..id = 1,
       );
-      dataChannel!.onMessage = onMessage;
+      dataChannel!.onMessage = (msg){
+        print(msg);
+        onMessage?.call(msg);
+      };
       dataChannel!.onDataChannelState = (state) {
         if (state == RTCDataChannelState.RTCDataChannelOpen) {
           dataChannelReady.complete();
@@ -189,8 +193,12 @@ class PeerConnection {
       };
     } else {
       peerConnection!.onDataChannel = (chan) {
+        print("chan: $chan");
         dataChannel = chan;
-        chan.onMessage = onMessage;
+        chan.onMessage = (msg){
+        print(msg);
+        onMessage?.call(msg);
+      };
         chan.onDataChannelState = (state) {
           if (state == RTCDataChannelState.RTCDataChannelOpen) {
             dataChannelReady.complete();
@@ -248,3 +256,12 @@ class PeerConnection {
     await room.sendSDPAnswer(selfId, peerId, data: answer);
   }
 }
+
+
+
+// TODO: remove peer handling from rooom, is should be totally decoupled,
+// user responsibility to manage the peers and route the signaling messages to them
+
+// TODO: peer could be more separate, initiatorpeer and receiverpeer, and a factory fun to make them, simpler code
+
+// TODO: transport strategies could be added in a list in ctor, only a ping is by default added
