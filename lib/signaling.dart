@@ -1,5 +1,6 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:webrtc_test/room.dart';
 
 abstract class AsyncDisposable {
   Future<void> disposeAsync();
@@ -17,7 +18,7 @@ abstract class Room {
   });
 }
 
-class WebRTCRoom {
+class WebRTCRoom implements Signaling {
   Room room;
   bool isSubscribed = false;
 
@@ -27,7 +28,9 @@ class WebRTCRoom {
     String fromPeerId,
     String toPeerId, {
     required RTCSessionDescription data,
-  }) => room.sendToPeer(
+  }) {
+    debugPrintWebRTC('sendSDPAnswer from $fromPeerId to $toPeerId');
+    return room.sendToPeer(
       toPeerId,
       data: {
         'from': fromPeerId,
@@ -36,12 +39,15 @@ class WebRTCRoom {
         'sdpType': data.type,
       },
     );
+  }
 
-   Future sendSDPOffer(
+  Future sendSDPOffer(
     String fromPeerId,
     String toPeerId, {
     required RTCSessionDescription data,
-  }) => room.sendToPeer(
+  }) {
+    debugPrintWebRTC('sendSDPOffer from $fromPeerId to $toPeerId');
+    return room.sendToPeer(
       toPeerId,
       data: {
         'from': fromPeerId,
@@ -50,12 +56,15 @@ class WebRTCRoom {
         'sdpType': data.type,
       },
     );
+  }
 
   Future sendICECandidate(
     String fromPeerId,
     String toPeerId, {
     required RTCIceCandidate data,
-  }) => room.sendToPeer(
+  }) {
+    debugPrintWebRTC('sendICECandidate from $fromPeerId to $toPeerId');
+    return room.sendToPeer(
       toPeerId,
       data: {
         'from': fromPeerId,
@@ -63,11 +72,14 @@ class WebRTCRoom {
         'candidate': data.toMap(),
       },
     );
+  }
 
   Future announcePresenceWithoutSubscribe(String userId) {
     if (isSubscribed == false) {
+      debugPrintWebRTC('announcePresenceWithoutSubscribe called before subscribe');
       throw Exception("Not yet subscribed, use announce presence first");
     }
+    debugPrintWebRTC('announcePresenceWithoutSubscribe for $userId');
     return room.announcePresence(userId: userId);
   }
 
@@ -80,11 +92,16 @@ class WebRTCRoom {
     required void Function(String userId) onUserJoin,
   }) {
     isSubscribed = true;
+    debugPrintWebRTC('announcePresence for $userId');
 
     return room.announcePresence(
       userId: userId,
-      onUserJoin: onUserJoin,
+      onUserJoin: (uid) {
+        debugPrintWebRTC('onUserJoin: $uid');
+        onUserJoin(uid);
+      },
       onReceiveData: (p0) {
+        debugPrintWebRTC('onReceiveData: ${p0["signal_type"]} from ${p0["from"]}');
         switch (p0["signal_type"]) {
           case "answer":
             onSDPAnswer(
@@ -120,6 +137,7 @@ class WebRTCRoom {
             );
             break;
           default:
+            debugPrintWebRTC('Unknown signal_type: ${p0["signal_type"]}');
         }
       },
     );
@@ -141,6 +159,7 @@ class SupabaseRoom implements Room, AsyncDisposable {
 
   @override
   Future sendToPeer(String peerid, {Map<String, dynamic>? data}) async {
+    debugPrintWebRTC('SupabaseRoom sendToPeer: $peerid, data: $data');
     await channel.sendBroadcastMessage(
       event: 'to_$peerid',
       payload: {...?data},
@@ -153,11 +172,13 @@ class SupabaseRoom implements Room, AsyncDisposable {
     void Function(Map<String, dynamic>)? onReceiveData,
     void Function(String userId)? onUserJoin,
   }) async {
+    debugPrintWebRTC('SupabaseRoom announcePresence for $userId');
     if (onUserJoin != null) {
       channel
           .onBroadcast(
             event: 'presence_signal',
             callback: (payload) {
+              debugPrintWebRTC('SupabaseRoom onUserJoin: ${payload["userId"]}');
               onUserJoin.call(payload["userId"]);
             },
           );
@@ -167,12 +188,14 @@ class SupabaseRoom implements Room, AsyncDisposable {
           .onBroadcast(
             event: 'to_$userId',
             callback: (payload) {
+              debugPrintWebRTC('SupabaseRoom onReceiveData: $payload');
               onReceiveData.call(payload);
             },
           );
     }
 
     if(onReceiveData != null || onUserJoin != null) {
+      debugPrintWebRTC('SupabaseRoom subscribing channel');
       channel.subscribe();
     }
 
@@ -184,6 +207,7 @@ class SupabaseRoom implements Room, AsyncDisposable {
 
   @override
   Future<void> disposeAsync() async {
+    debugPrintWebRTC('SupabaseRoom disposeAsync');
     await client.removeChannel(channel);
   }
 }

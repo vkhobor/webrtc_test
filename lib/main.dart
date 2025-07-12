@@ -99,7 +99,7 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
  
 
-    widget.join.onJoin = (peer) {
+    widget.join.onPeerAdded = (peer) {
       peer.onMessage = (msg) {
         setState(() {
            _messages.add(msg.text);
@@ -116,7 +116,7 @@ class _MyHomePageState extends State<MyHomePage> {
     if (text.isNotEmpty) {
       for (var roomOccupant in widget.join.otherUsersInRoom.entries) {
         final peer = roomOccupant.value;
-        await peer.dataChannelReady.future;
+        await peer.dataChannelReady;
         await peer.sendData(RTCDataChannelMessage(text));
       }
       setState(() {
