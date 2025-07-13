@@ -6,24 +6,11 @@ abstract class AsyncDisposable {
   Future<void> disposeAsync();
 }
 
-abstract class Room {
-  Room({required String roomid});
-
-  Future sendToPeer(String peerid, {Map<String, dynamic> data});
-
-  Future announcePresence({
-    required String userId,
-    void Function(Map<String, dynamic>)? onReceiveData,
-    void Function(String userId)? onUserJoin,
-  });
-}
-
-class WebRTCRoom implements Signaling {
+class WebRTCRoomAdapter implements WebRTCRoom {
   Room room;
-  bool isSubscribed = false;
+  WebRTCRoomAdapter({required this.room});
 
-  WebRTCRoom({required this.room});
-
+  @override
   Future sendSDPAnswer(
     String fromPeerId,
     String toPeerId, {
@@ -41,6 +28,7 @@ class WebRTCRoom implements Signaling {
     );
   }
 
+  @override
   Future sendSDPOffer(
     String fromPeerId,
     String toPeerId, {
@@ -58,6 +46,7 @@ class WebRTCRoom implements Signaling {
     );
   }
 
+  @override
   Future sendICECandidate(
     String fromPeerId,
     String toPeerId, {
@@ -74,34 +63,29 @@ class WebRTCRoom implements Signaling {
     );
   }
 
-  Future announcePresenceWithoutSubscribe(String userId) {
-    if (isSubscribed == false) {
-      debugPrintWebRTC('announcePresenceWithoutSubscribe called before subscribe');
-      throw Exception("Not yet subscribed, use announce presence first");
-    }
-    debugPrintWebRTC('announcePresenceWithoutSubscribe for $userId');
-    return room.announcePresence(userId: userId);
-  }
-
-  Future announcePresence({
+  @override
+  Future join({
     required String userId,
     required void Function(RTCSessionDescription, String fromPeerId)
     onSDPAnswer,
     required void Function(RTCSessionDescription, String fromPeerId) onSDPOffer,
     required void Function(RTCIceCandidate, String fromPeerId) onICECandidate,
     required void Function(String userId) onUserJoin,
+    required void Function(String userId) onUserLeave,
   }) {
-    isSubscribed = true;
     debugPrintWebRTC('announcePresence for $userId');
 
-    return room.announcePresence(
+    return room.join(
       userId: userId,
+      onUserLeave: onUserLeave,
       onUserJoin: (uid) {
         debugPrintWebRTC('onUserJoin: $uid');
         onUserJoin(uid);
       },
       onReceiveData: (p0) {
-        debugPrintWebRTC('onReceiveData: ${p0["signal_type"]} from ${p0["from"]}');
+        debugPrintWebRTC(
+          'onReceiveData: ${p0["signal_type"]} from ${p0["from"]}',
+        );
         switch (p0["signal_type"]) {
           case "answer":
             onSDPAnswer(
@@ -142,6 +126,11 @@ class WebRTCRoom implements Signaling {
       },
     );
   }
+
+  @override
+  Future leave() async {
+    room.leave();
+  }
 }
 
 class SupabaseRoom implements Room, AsyncDisposable {
@@ -154,7 +143,10 @@ class SupabaseRoom implements Room, AsyncDisposable {
     required this.client,
     String? namespace,
   }) {
-    channel = client.channel('${namespace ?? 'signaling'}_$roomid',opts: RealtimeChannelConfig(private: false));
+    channel = client.channel(
+      '${namespace ?? 'signaling'}_$roomid',
+      opts: RealtimeChannelConfig(private: false),
+    );
   }
 
   @override
@@ -167,47 +159,58 @@ class SupabaseRoom implements Room, AsyncDisposable {
   }
 
   @override
-  Future announcePresence({
+  Future join({
     required String userId,
     void Function(Map<String, dynamic>)? onReceiveData,
     void Function(String userId)? onUserJoin,
+    void Function(String userId)? onUserLeave
   }) async {
     debugPrintWebRTC('SupabaseRoom announcePresence for $userId');
-    if (onUserJoin != null) {
-      channel
-          .onBroadcast(
-            event: 'presence_signal',
-            callback: (payload) {
-              debugPrintWebRTC('SupabaseRoom onUserJoin: ${payload["userId"]}');
-              onUserJoin.call(payload["userId"]);
-            },
-          );
-    }
-    if (onReceiveData != null) {
-      channel
-          .onBroadcast(
-            event: 'to_$userId',
-            callback: (payload) {
-              debugPrintWebRTC('SupabaseRoom onReceiveData: $payload');
-              onReceiveData.call(payload);
-            },
-          );
-    }
-
-    if(onReceiveData != null || onUserJoin != null) {
-      debugPrintWebRTC('SupabaseRoom subscribing channel');
-      channel.subscribe();
-    }
-
-    await channel.sendBroadcastMessage(
+    channel.onBroadcast(
       event: 'presence_signal',
-      payload: {'userId': userId},
-    );
+      callback: (payload) {
+        debugPrintWebRTC('SupabaseRoom onUserJoin: ${payload["userId"]}');
+        onUserJoin!.call(payload["userId"]);
+      },
+    ).onBroadcast(
+      event: 'to_$userId',
+      callback: (payload) {
+        debugPrintWebRTC('SupabaseRoom onReceiveData: $payload');
+        onReceiveData!.call(payload);
+      },
+    )
+        .onPresenceJoin((payload) {
+      final joinedId = payload.newPresences.first.payload['id'] as String;
+      if(joinedId != userId) {
+      onUserJoin!.call(joinedId);
+      }
+      
+    }).onPresenceLeave((payload) {
+      final joinedId = payload.leftPresences.first.payload['id'] as String;
+      if(joinedId != userId) {
+      onUserLeave!.call(joinedId);
+      }
+    });
+
+    debugPrintWebRTC('SupabaseRoom subscribing channel');
+    channel.subscribe((status, error) {
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        channel.track({
+          'id': userId,
+        });
+      }
+    });
   }
 
   @override
   Future<void> disposeAsync() async {
     debugPrintWebRTC('SupabaseRoom disposeAsync');
+    await leave();
     await client.removeChannel(channel);
+  }
+
+  @override
+  Future leave() async {
+    await channel.unsubscribe();
   }
 }
