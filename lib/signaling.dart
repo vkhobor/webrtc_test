@@ -163,41 +163,46 @@ class SupabaseRoom implements Room, AsyncDisposable {
     required String userId,
     void Function(Map<String, dynamic>)? onReceiveData,
     void Function(String userId)? onUserJoin,
-    void Function(String userId)? onUserLeave
+    void Function(String userId)? onUserLeave,
   }) async {
     debugPrintWebRTC('SupabaseRoom announcePresence for $userId');
-    channel.onBroadcast(
-      event: 'presence_signal',
-      callback: (payload) {
-        debugPrintWebRTC('SupabaseRoom onUserJoin: ${payload["userId"]}');
-        onUserJoin!.call(payload["userId"]);
-      },
-    ).onBroadcast(
-      event: 'to_$userId',
-      callback: (payload) {
-        debugPrintWebRTC('SupabaseRoom onReceiveData: $payload');
-        onReceiveData!.call(payload);
-      },
-    )
+    channel
+        .onBroadcast(
+          event: 'presence_signal',
+          callback: (payload) {
+            debugPrintWebRTC('SupabaseRoom onUserJoin: ${payload["userId"]}');
+            onUserJoin!.call(payload["userId"]);
+          },
+        )
+        .onBroadcast(
+          event: 'to_$userId',
+          callback: (payload) {
+            debugPrintWebRTC('SupabaseRoom onReceiveData: $payload');
+            onReceiveData!.call(payload);
+          },
+        )
         .onPresenceJoin((payload) {
-      final joinedId = payload.newPresences.first.payload['id'] as String;
-      if(joinedId != userId) {
-      onUserJoin!.call(joinedId);
-      }
-      
-    }).onPresenceLeave((payload) {
-      final joinedId = payload.leftPresences.first.payload['id'] as String;
-      if(joinedId != userId) {
-      onUserLeave!.call(joinedId);
-      }
-    });
+          final joinedId = payload.newPresences.first.payload['id'];
+          if (joinedId == null) return;
+          final joinedIdString = joinedId as String;
+          if (joinedIdString != userId) {
+            onUserJoin!.call(joinedId);
+          }
+        })
+        .onPresenceLeave((payload) {
+          final joinedId = payload.leftPresences.first.payload['id'];
+          if (joinedId == null) return;
+          final joinedIdString = joinedId as String;
+
+          if (joinedIdString != userId) {
+            onUserLeave!.call(joinedId);
+          }
+        });
 
     debugPrintWebRTC('SupabaseRoom subscribing channel');
     channel.subscribe((status, error) {
       if (status == RealtimeSubscribeStatus.subscribed) {
-        channel.track({
-          'id': userId,
-        });
+        channel.track({'id': userId});
       }
     });
   }
